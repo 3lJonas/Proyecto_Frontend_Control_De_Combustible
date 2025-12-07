@@ -1,59 +1,90 @@
-import { useState } from "react"
-import reactLogo from "./assets/react.svg"
-import viteLogo from "/vite.svg"
-import "./App.css"
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import "./App.css";
+import Navbar from "./components/layout/Navbar";
+import ProtectedRoute from "./components/layout/ProtectedRoute";
+import { AuthProvider } from "./context/AuthContext";
+import AsignacionRutasPage from "./pages/AsignacionRutasPage";
+import ChoferesPage from "./pages/ChoferesPage";
+import ConsumosPage from "./pages/ConsumosPage";
+import DashboardPage from "./pages/DashboardPage";
+import LoginPage from "./pages/LoginPage";
+import RutasPage from "./pages/RutasPage";
+import VehiculosPage from "./pages/VehiculosPage";
+import { ROLES } from "./utils/permissionsHelper";
 
 export default function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-6">
-
-      {/* Logos */}
-      <div className="flex items-center gap-6 mb-6">
-        <a href="https://vite.dev" target="_blank">
-          <img
-            src={viteLogo}
-            className="w-20 hover:drop-shadow-xl transition"
-            alt="Vite logo"
-          />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img
-            src={reactLogo}
-            className="w-20 hover:drop-shadow-xl transition animate-spin-slow"
-            alt="React logo"
-          />
-        </a>
-      </div>
-
-      {/* Título */}
-      <h1 className="text-5xl font-bold text-blue-600 mb-8">
-        Vite + React + Tailwind
-      </h1>
-
-      {/* Card */}
-      <div className="bg-white shadow-lg rounded-2xl p-6 w-full max-w-md text-center">
-        <button
-          onClick={() => setCount(count + 1)}
-          className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition mb-4"
-        >
-          count is {count}
-        </button>
-
-        <p className="text-gray-700">
-          Edit <code className="font-bold">src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-
-      <p className="mt-6 text-gray-500">
-        Click on the Vite and React logos to learn more
-      </p>
-
-      <h1 className="text-3xl font-bold underline mt-10">
-        Hello world!
-      </h1>
-    </div>
-  )
+    <AuthProvider>
+      <BrowserRouter>
+        <div className="min-h-screen flex flex-col bg-slate-100">
+          <Navbar />
+          <main className="flex-1">
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <DashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/choferes"
+                element={
+                  <ProtectedRoute allowedRoles={[ROLES.ADMINISTRADOR]}>
+                    <ChoferesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/vehiculos"
+                element={
+                  <ProtectedRoute allowedRoles={[ROLES.ADMINISTRADOR]}>
+                    <VehiculosPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/rutas"
+                element={
+                  <ProtectedRoute allowedRoles={[ROLES.ADMINISTRADOR]}>
+                    <RutasPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/asignaciones"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      ROLES.ADMINISTRADOR,
+                      ROLES.SUPERVISOR,
+                      ROLES.OPERADOR,
+                    ]}
+                  >
+                    <AsignacionRutasPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/consumos"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      ROLES.ADMINISTRADOR,
+                      ROLES.SUPERVISOR,
+                      ROLES.OPERADOR,
+                    ]}
+                  >
+                    <ConsumosPage />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </main>
+        </div>
+      </BrowserRouter>
+    </AuthProvider>
+  );
 }
-
