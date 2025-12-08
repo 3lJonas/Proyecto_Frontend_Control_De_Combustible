@@ -357,20 +357,23 @@ export default function DashboardPage() {
         }
       };
 
-      const drawBarChart = ({ title, data, labelKey, valueKey, color = [59, 130, 246] }) => {
-        if (!data || data.length === 0) return;
-        ensureSpace(20 + data.length * 7);
+      const drawTitle = (title) => {
         pdf.setFontSize(12);
         pdf.text(title, pageWidth / 2, cursorY, { align: "center" });
         cursorY += 6;
-        const marginX = 20;
-        const chartWidth = pageWidth - marginX * 2;
+      };
+
+      const drawBarChart = ({ title, data, labelKey, valueKey, color = [59, 130, 246] }) => {
+        if (!data || data.length === 0) return;
         const barHeight = 6;
         const gap = 4;
+        const marginX = 20;
+        const chartWidth = pageWidth - marginX * 2;
         const maxValue = Math.max(...data.map((d) => Number(d[valueKey] || 0)), 1);
-
+        ensureSpace(16 + data.length * (barHeight + gap));
+        drawTitle(title);
         data.forEach((item) => {
-          const label = String(item[labelKey]).slice(0, 25);
+          const label = String(item[labelKey]).slice(0, 28);
           const val = Number(item[valueKey] || 0);
           const width = (val / maxValue) * chartWidth;
           pdf.setFontSize(8);
@@ -381,7 +384,153 @@ export default function DashboardPage() {
           pdf.text(`${val}`, marginX + 40 + width + 2, cursorY + barHeight - 1);
           cursorY += barHeight + gap;
         });
-        cursorY += 4;
+        cursorY += 2;
+      };
+
+      const drawLineChart = ({ title, data, yKey, color = [16, 185, 129] }) => {
+        if (!data || data.length === 0) return;
+        const height = 50;
+        const marginX = 24;
+        const chartWidth = pageWidth - marginX * 2;
+        const maxY = Math.max(...data.map((d) => Number(d[yKey] || 0)), 1);
+        const stepX = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
+        ensureSpace(70);
+        drawTitle(title);
+        const baseY = cursorY + height;
+        pdf.setDrawColor(...color);
+        pdf.setLineWidth(0.8);
+        data.forEach((point, idx) => {
+          const x = marginX + idx * stepX;
+          const yVal = Number(point[yKey] || 0);
+          const y = baseY - (yVal / maxY) * height;
+          if (idx === 0) pdf.moveTo(x, y);
+          else pdf.lineTo(x, y);
+          pdf.circle(x, y, 1.5, "F");
+        });
+        pdf.stroke();
+        cursorY += height + 10;
+      };
+
+      const drawAreaChart = ({ title, data, yKey, color = [59, 130, 246] }) => {
+        if (!data || data.length === 0) return;
+        const height = 50;
+        const marginX = 24;
+        const chartWidth = pageWidth - marginX * 2;
+        const maxY = Math.max(...data.map((d) => Number(d[yKey] || 0)), 1);
+        const stepX = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
+        ensureSpace(80);
+        drawTitle(title);
+        const baseY = cursorY + height;
+        pdf.setDrawColor(...color);
+        pdf.setFillColor(...color);
+        pdf.setLineWidth(0.6);
+        pdf.moveTo(marginX, baseY);
+        data.forEach((point, idx) => {
+          const x = marginX + idx * stepX;
+          const yVal = Number(point[yKey] || 0);
+          const y = baseY - (yVal / maxY) * height;
+          pdf.lineTo(x, y);
+        });
+        pdf.lineTo(marginX + chartWidth, baseY);
+        pdf.lineTo(marginX, baseY);
+        pdf.setFillColor(color[0], color[1], color[2], 60);
+        pdf.fill();
+        cursorY += height + 12;
+      };
+
+      const drawPieChart = ({ title, data, labelKey, valueKey, colors }) => {
+        if (!data || data.length === 0) return;
+        ensureSpace(80);
+        drawTitle(title);
+        const radius = 30;
+        const cx = pageWidth / 2;
+        const cy = cursorY + radius + 4;
+        const total = data.reduce((s, d) => s + (Number(d[valueKey]) || 0), 0) || 1;
+        let startAngle = 0;
+        data.forEach((d, idx) => {
+          const val = Number(d[valueKey]) || 0;
+          const angle = (val / total) * Math.PI * 2;
+          const endAngle = startAngle + angle;
+          const col = colors[idx % colors.length];
+          pdf.setFillColor(...col);
+          const steps = Math.max(6, Math.ceil((angle / (Math.PI * 2)) * 36));
+          pdf.moveTo(cx, cy);
+          for (let s = 0; s <= steps; s += 1) {
+            const t = startAngle + (angle * s) / steps;
+            const x = cx + radius * Math.cos(t);
+            const y = cy + radius * Math.sin(t);
+            pdf.lineTo(x, y);
+          }
+          pdf.closePath();
+          pdf.fill();
+          startAngle = endAngle;
+        });
+        // mini-leyenda
+        let ly = cy + radius + 8;
+        data.forEach((d, idx) => {
+          const col = colors[idx % colors.length];
+          pdf.setFillColor(...col);
+          pdf.rect(cx - 40, ly - 4, 6, 6, 'F');
+          pdf.setFontSize(8);
+          const val = Number(d[valueKey]) || 0;
+          const pct = ((val / total) * 100).toFixed(1);
+          pdf.text(`${d[labelKey]} (${pct}%)`, cx - 30, ly + 1);
+          ly += 6;
+        });
+        cursorY = ly + 6;
+      };
+
+      const drawRadarChart = ({ title, data, series }) => {
+        if (!data || data.length === 0 || series.length === 0) return;
+        const axes = data.slice(0, 6);
+        const values = axes.flatMap((item) => series.map((s) => Number(item[s.key] || 0)));
+        const maxVal = Math.max(...values, 1);
+        const radius = 34;
+        const cx = pageWidth / 2;
+        ensureSpace(110);
+        drawTitle(title);
+        const cy = cursorY + radius + 6;
+        const angleStep = (Math.PI * 2) / axes.length;
+        pdf.setDrawColor(156, 163, 175);
+        pdf.setLineWidth(0.25);
+        for (let r = 0.25; r <= 1.01; r += 0.25) {
+          pdf.circle(cx, cy, radius * r, 'S');
+        }
+        series.forEach((serie) => {
+          pdf.setDrawColor(...serie.color);
+          pdf.setFillColor(serie.color[0], serie.color[1], serie.color[2], 50);
+          pdf.setLineWidth(0.8);
+          axes.forEach((item, idx) => {
+            const val = Number(item[serie.key] || 0);
+            const r = (val / maxVal) * radius;
+            const angle = -Math.PI / 2 + idx * angleStep;
+            const x = cx + r * Math.cos(angle);
+            const y = cy + r * Math.sin(angle);
+            if (idx === 0) pdf.moveTo(x, y);
+            else pdf.lineTo(x, y);
+            pdf.circle(x, y, 1.5, 'F');
+          });
+          pdf.closePath();
+          pdf.fillStroke();
+        });
+        // etiquetas
+        pdf.setFontSize(8);
+        axes.forEach((item, idx) => {
+          const angle = -Math.PI / 2 + idx * angleStep;
+          const x = cx + (radius + 10) * Math.cos(angle);
+          const y = cy + (radius + 10) * Math.sin(angle);
+          const label = (item.vehiculo || 'Vehículo').slice(0, 12);
+          pdf.text(label, x, y, { align: 'center' });
+        });
+        // leyenda simple
+        let legendY = cy + radius + 12;
+        series.forEach((serie) => {
+          pdf.setFillColor(...serie.color);
+          pdf.rect(cx - 35, legendY - 4, 6, 6, 'F');
+          pdf.text(serie.label, cx - 26, legendY + 1);
+          legendY += 6;
+        });
+        cursorY = legendY + 6;
       };
 
       // Encabezado
@@ -398,21 +547,33 @@ export default function DashboardPage() {
 
       cursorY += 6;
 
-      // Gráficos en formato vectorial simple
-      drawBarChart({
+      const hexToRgb = (hex) => {
+        const v = parseInt(hex.replace('#', ''), 16);
+        return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+      };
+      const palette = COLORS.map(hexToRgb);
+
+      // Gráficos en formato vectorial simple para PDF (sin screenshots)
+      drawAreaChart({
         title: "Consumo mensual (L)",
         data: consumosPorMes,
-        labelKey: "mes",
-        valueKey: "combustible",
+        yKey: "combustible",
         color: [59, 130, 246],
       });
 
-      drawBarChart({
-        title: "Distribución por tipo de maquinaria (L)",
+      drawLineChart({
+        title: "Registros de consumo por mes",
+        data: consumosPorMes,
+        yKey: "registros",
+        color: [16, 185, 129],
+      });
+
+      drawPieChart({
+        title: "Distribución por tipo de maquinaria",
         data: consumosPorTipo,
         labelKey: "tipo",
         valueKey: "combustible",
-        color: [16, 185, 129],
+        colors: palette,
       });
 
       drawBarChart({
@@ -431,23 +592,14 @@ export default function DashboardPage() {
         color: [236, 72, 153],
       });
 
-      drawBarChart({
-        title: "Eficiencia de combustible (consumo promedio)",
-        data: eficienciaVehiculos,
-        labelKey: "vehiculo",
-        valueKey: "promedio",
-        color: [239, 68, 68],
+      drawRadarChart({
+        title: "Eficiencia de combustible (real vs esperado)",
+        data: eficienciaVehiculos.slice(0, 6),
+        series: [
+          { key: "promedio", label: "Promedio real", color: [239, 68, 68] },
+          { key: "esperado", label: "Esperado", color: [16, 185, 129] },
+        ],
       });
-
-      ensureSpace(14);
-      pdf.setFontSize(9);
-      pdf.text(
-        "Nota: barras muestran consumo real promedio; columna de 'esperado' disponible en tabla.",
-        pageWidth / 2,
-        cursorY + 6,
-        { align: "center" }
-      );
-      cursorY += 10;
 
       ensureSpace(6);
       pdf.setDrawColor(209, 213, 219);
