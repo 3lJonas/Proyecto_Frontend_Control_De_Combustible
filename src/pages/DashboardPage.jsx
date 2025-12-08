@@ -24,7 +24,6 @@ import {
   Radar,
 } from "recharts";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import {
   normalizeAsignacion,
   normalizeConsumo,
@@ -397,103 +396,7 @@ export default function DashboardPage() {
       });
       cursorY += 10;
 
-      // Resumen principal
-      autoTable(pdf, {
-        startY: cursorY,
-        head: [["Métrica", "Valor"]],
-        body: [
-          ["Total Vehículos", stats.totalVehiculos],
-          ["Vehículos Livianos", stats.livianos],
-          ["Vehículos Pesados", stats.pesados],
-          ["Vehículos Operativos", stats.vehiculosOperativos],
-          ["Vehículos en Mantenimiento", stats.vehiculosMantenimiento],
-          ["Total Consumos", stats.totalConsumos],
-          ["Combustible Total (L)", stats.combustibleTotal.toFixed(2)],
-          ["Promedio por Registro (L)", stats.promedioConsumo.toFixed(2)],
-          ["Total Choferes", stats.totalChoferes],
-          ["Choferes Disponibles", stats.choferesDisponibles],
-          ["Total Rutas", stats.totalRutas],
-          ["Asignaciones", stats.totalAsignaciones],
-        ],
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 9, cellPadding: 3 },
-        headStyles: { fillColor: [59, 130, 246] },
-      });
-
-      cursorY = pdf.lastAutoTable.finalY + 6;
-
-      // Consumo mensual
-      autoTable(pdf, {
-        startY: cursorY,
-        head: [["Mes", "Combustible (L)", "Registros"]],
-        body: consumosPorMes.map((c) => [c.mes, c.combustible.toFixed(2), c.registros]),
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [59, 130, 246] },
-        didDrawPage: (data) => {
-          cursorY = data.cursor.y;
-        },
-      });
-
-      cursorY = pdf.lastAutoTable.finalY + 6;
-
-      // Distribución por tipo
-      autoTable(pdf, {
-        startY: cursorY,
-        head: [["Tipo de Maquinaria", "Combustible (L)", "%"]],
-        body: consumosPorTipo.map((t) => [
-          t.tipo,
-          t.combustible.toFixed(2),
-          stats.combustibleTotal > 0
-            ? `${((t.combustible / stats.combustibleTotal) * 100).toFixed(1)}%`
-            : "0%",
-        ]),
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [16, 185, 129] },
-      });
-
-      cursorY = pdf.lastAutoTable.finalY + 6;
-
-      // Rutas más utilizadas
-      autoTable(pdf, {
-        startY: cursorY,
-        head: [["Ruta", "Asignaciones", "Distancia (km)"]],
-        body: rutasMasUsadas.map((r) => [r.nombre, r.asignaciones, r.distancia || 0]),
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [139, 92, 246] },
-      });
-
-      cursorY = pdf.lastAutoTable.finalY + 6;
-
-      // Choferes más activos
-      autoTable(pdf, {
-        startY: cursorY,
-        head: [["Chofer", "Asignaciones"]],
-        body: choferesMasActivos.map((c) => [c.nombre, c.asignaciones]),
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [236, 72, 153] },
-      });
-
-      cursorY = pdf.lastAutoTable.finalY + 6;
-
-      // Eficiencia de combustible
-      autoTable(pdf, {
-        startY: cursorY,
-        head: [["Vehículo", "Consumo Promedio (L)", "Consumo Esperado (L)"]],
-        body: eficienciaVehiculos.map((e) => [
-          e.vehiculo,
-          e.promedio,
-          e.esperado,
-        ]),
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [239, 68, 68] },
-      });
-
-      cursorY = pdf.lastAutoTable.finalY + 10;
+      cursorY += 6;
 
       // Gráficos en formato vectorial simple
       drawBarChart({
