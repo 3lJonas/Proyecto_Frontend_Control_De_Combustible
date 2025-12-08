@@ -349,7 +349,41 @@ export default function DashboardPage() {
     try {
       const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
       let cursorY = 20;
+      const ensureSpace = (needed) => {
+        if (cursorY + needed > pageHeight - 12) {
+          pdf.addPage();
+          cursorY = 14;
+        }
+      };
+
+      const drawBarChart = ({ title, data, labelKey, valueKey, color = [59, 130, 246] }) => {
+        if (!data || data.length === 0) return;
+        ensureSpace(20 + data.length * 7);
+        pdf.setFontSize(12);
+        pdf.text(title, pageWidth / 2, cursorY, { align: "center" });
+        cursorY += 6;
+        const marginX = 20;
+        const chartWidth = pageWidth - marginX * 2;
+        const barHeight = 6;
+        const gap = 4;
+        const maxValue = Math.max(...data.map((d) => Number(d[valueKey] || 0)), 1);
+
+        data.forEach((item) => {
+          const label = String(item[labelKey]).slice(0, 25);
+          const val = Number(item[valueKey] || 0);
+          const width = (val / maxValue) * chartWidth;
+          pdf.setFontSize(8);
+          pdf.setTextColor(55, 65, 81);
+          pdf.text(label, marginX, cursorY + barHeight - 1);
+          pdf.setFillColor(...color);
+          pdf.rect(marginX + 40, cursorY, width, barHeight, "F");
+          pdf.text(`${val}`, marginX + 40 + width + 2, cursorY + barHeight - 1);
+          cursorY += barHeight + gap;
+        });
+        cursorY += 4;
+      };
 
       // Encabezado
       pdf.setFontSize(18);
@@ -458,6 +492,63 @@ export default function DashboardPage() {
         styles: { fontSize: 9 },
         headStyles: { fillColor: [239, 68, 68] },
       });
+
+      cursorY = pdf.lastAutoTable.finalY + 10;
+
+      // Gráficos en formato vectorial simple
+      drawBarChart({
+        title: "Consumo mensual (L)",
+        data: consumosPorMes,
+        labelKey: "mes",
+        valueKey: "combustible",
+        color: [59, 130, 246],
+      });
+
+      drawBarChart({
+        title: "Distribución por tipo de maquinaria (L)",
+        data: consumosPorTipo,
+        labelKey: "tipo",
+        valueKey: "combustible",
+        color: [16, 185, 129],
+      });
+
+      drawBarChart({
+        title: "Rutas más utilizadas (asignaciones)",
+        data: rutasMasUsadas,
+        labelKey: "nombre",
+        valueKey: "asignaciones",
+        color: [139, 92, 246],
+      });
+
+      drawBarChart({
+        title: "Choferes más activos (asignaciones)",
+        data: choferesMasActivos,
+        labelKey: "nombre",
+        valueKey: "asignaciones",
+        color: [236, 72, 153],
+      });
+
+      drawBarChart({
+        title: "Eficiencia de combustible (consumo promedio)",
+        data: eficienciaVehiculos,
+        labelKey: "vehiculo",
+        valueKey: "promedio",
+        color: [239, 68, 68],
+      });
+
+      ensureSpace(14);
+      pdf.setFontSize(9);
+      pdf.text(
+        "Nota: barras muestran consumo real promedio; columna de 'esperado' disponible en tabla.",
+        pageWidth / 2,
+        cursorY + 6,
+        { align: "center" }
+      );
+      cursorY += 10;
+
+      ensureSpace(6);
+      pdf.setDrawColor(209, 213, 219);
+      pdf.line(14, cursorY, pageWidth - 14, cursorY);
 
       pdf.save(`reporte-combustible-${new Date().toISOString().split("T")[0]}.pdf`);
     } catch (error) {
