@@ -453,16 +453,17 @@ export default function DashboardPage() {
           const endAngle = startAngle + angle;
           const col = colors[idx % colors.length];
           pdf.setFillColor(...col);
-          const steps = Math.max(6, Math.ceil((angle / (Math.PI * 2)) * 36));
-          pdf.moveTo(cx, cy);
-          for (let s = 0; s <= steps; s += 1) {
+          const steps = Math.max(4, Math.ceil((angle / (Math.PI * 2)) * 24));
+          let prevX = cx + radius * Math.cos(startAngle);
+          let prevY = cy + radius * Math.sin(startAngle);
+          for (let s = 1; s <= steps; s += 1) {
             const t = startAngle + (angle * s) / steps;
             const x = cx + radius * Math.cos(t);
             const y = cy + radius * Math.sin(t);
-            pdf.lineTo(x, y);
+            pdf.triangle(cx, cy, prevX, prevY, x, y, 'F');
+            prevX = x;
+            prevY = y;
           }
-          pdf.closePath();
-          pdf.fill();
           startAngle = endAngle;
         });
         // mini-leyenda
@@ -500,17 +501,26 @@ export default function DashboardPage() {
           pdf.setDrawColor(...serie.color);
           pdf.setFillColor(serie.color[0], serie.color[1], serie.color[2], 50);
           pdf.setLineWidth(0.8);
+          let startX = null;
+          let startY = null;
           axes.forEach((item, idx) => {
             const val = Number(item[serie.key] || 0);
             const r = (val / maxVal) * radius;
             const angle = -Math.PI / 2 + idx * angleStep;
             const x = cx + r * Math.cos(angle);
             const y = cy + r * Math.sin(angle);
-            if (idx === 0) pdf.moveTo(x, y);
-            else pdf.lineTo(x, y);
+            if (idx === 0) {
+              pdf.moveTo(x, y);
+              startX = x;
+              startY = y;
+            } else {
+              pdf.lineTo(x, y);
+            }
             pdf.circle(x, y, 1.5, 'F');
           });
-          pdf.closePath();
+          if (startX !== null && startY !== null) {
+            pdf.lineTo(startX, startY);
+          }
           pdf.fillStroke();
         });
         // etiquetas
