@@ -23,8 +23,13 @@ import {
   PolarRadiusAxis,
   Radar,
 } from "recharts";
-import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import {
+  normalizeAsignacion,
+  normalizeConsumo,
+  normalizeTipoMaquinaria,
+} from "../utils/dataTransforms";
 
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"];
 
@@ -72,20 +77,27 @@ export default function DashboardPage() {
         const choferes = chofRes.data || [];
         const rutas = rutRes.data || [];
         const asignaciones = asigRes.data || [];
+
+        const asignacionesNorm = asignaciones
+          .map((a) => normalizeAsignacion(a))
+          .filter(Boolean);
+        const consumosNorm = consumos
+          .map((c) => normalizeConsumo(c))
+          .filter(Boolean);
         
         // Estadísticas básicas de vehículos
         const livianos = vehiculos.filter(
-          (v) => v.tipoMaquinaria?.toLowerCase() === "liviana"
+          (v) => normalizeTipoMaquinaria(v.tipoMaquinaria) === "Liviana"
         ).length;
         const pesados = vehiculos.filter(
-          (v) => v.tipoMaquinaria?.toLowerCase() === "pesada"
+          (v) => normalizeTipoMaquinaria(v.tipoMaquinaria) === "Pesada"
         ).length;
-        
+
         const vehiculosOperativos = vehiculos.filter(
-          (v) => v.estadoOperativo?.toLowerCase() === "operativo"
+          (v) => (v.estadoOperativo || "").toLowerCase() === "operativo"
         ).length;
         const vehiculosMantenimiento = vehiculos.filter(
-          (v) => v.estadoOperativo?.toLowerCase() === "mantenimiento"
+          (v) => (v.estadoOperativo || "").toLowerCase() === "mantenimiento"
         ).length;
         
         const choferesDisponibles = choferes.filter(
@@ -93,12 +105,12 @@ export default function DashboardPage() {
         ).length;
 
         // Calcular combustible total y promedio
-        const combustibleTotal = consumos.reduce(
+        const combustibleTotal = consumosNorm.reduce(
           (sum, c) => sum + (c.combustibleReal || 0),
           0
         );
-        const promedioConsumo = consumos.length > 0 
-          ? combustibleTotal / consumos.length 
+        const promedioConsumo = consumosNorm.length > 0 
+          ? combustibleTotal / consumosNorm.length 
           : 0;
 
         setStats({
@@ -118,7 +130,7 @@ export default function DashboardPage() {
 
         // Procesar consumos por mes (últimos 6 meses)
         const consumosPorMesMap = {};
-        consumos.forEach((c) => {
+        consumosNorm.forEach((c) => {
           if (c.fechaRegistro) {
             const fecha = new Date(c.fechaRegistro);
             const mesKey = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
@@ -150,14 +162,14 @@ export default function DashboardPage() {
 
         // Top 10 vehículos con mayor consumo
         const consumosPorVehMap = {};
-        consumos.forEach((c) => {
-          const placa = c.placaVehiculo || "Sin placa";
-          const vehiculo = vehiculos.find(v => v.placa === placa);
+        consumosNorm.forEach((c) => {
+          const placa = c.asignacion?.vehiculoPlaca || "Sin placa";
+          const vehiculo = vehiculos.find(v => v.placa === placa || v.nombre === c.vehiculoNombre);
           if (!consumosPorVehMap[placa]) {
             consumosPorVehMap[placa] = { 
               placa, 
               combustible: 0,
-              nombre: vehiculo?.nombre || placa
+              nombre: vehiculo?.nombre || c.vehiculoNombre || placa
             };
           }
           consumosPorVehMap[placa].combustible += c.combustibleReal || 0;
@@ -172,11 +184,11 @@ export default function DashboardPage() {
         setConsumosPorVehiculo(consumosVeh);
 
         // Consumos por tipo de maquinaria
-        const combustibleLiviana = consumos
-          .filter((c) => c.tipoMaquinaria?.toLowerCase() === "liviana")
+        const combustibleLiviana = consumosNorm
+          .filter((c) => c.tipoMaquinaria === "Liviana")
           .reduce((sum, c) => sum + (c.combustibleReal || 0), 0);
-        const combustiblePesada = consumos
-          .filter((c) => c.tipoMaquinaria?.toLowerCase() === "pesada")
+        const combustiblePesada = consumosNorm
+          .filter((c) => c.tipoMaquinaria === "Pesada")
           .reduce((sum, c) => sum + (c.combustibleReal || 0), 0);
         
         setConsumosPorTipo([
@@ -186,7 +198,7 @@ export default function DashboardPage() {
 
         // Rutas más usadas
         const rutasMap = {};
-        asignaciones.forEach((a) => {
+        asignacionesNorm.forEach((a) => {
           const rutaId = a.rutaId;
           const ruta = rutas.find(r => r.id === rutaId);
           if (ruta) {
@@ -207,7 +219,7 @@ export default function DashboardPage() {
 
         // Choferes más activos
         const choferesMap = {};
-        asignaciones.forEach((a) => {
+        asignacionesNorm.forEach((a) => {
           const choferId = a.choferId;
           const chofer = choferes.find(ch => ch.id === choferId);
           if (chofer) {
@@ -233,27 +245,30 @@ export default function DashboardPage() {
 
         // Eficiencia de vehículos (consumo promedio por vehículo)
         const eficienciaMap = {};
-        consumos.forEach((c) => {
-          const placa = c.placaVehiculo;
-          const vehiculo = vehiculos.find(v => v.placa === placa);
-          if (vehiculo && vehiculo.consumoCombustibleKm) {
-            if (!eficienciaMap[placa]) {
-              eficienciaMap[placa] = {
-                vehiculo: vehiculo.nombre || placa,
-                consumoReal: 0,
-                consumoEsperado: vehiculo.consumoCombustibleKm,
-                registros: 0
-              };
-            }
-            eficienciaMap[placa].consumoReal += c.combustibleReal || 0;
-            eficienciaMap[placa].registros += 1;
+        consumosNorm.forEach((c) => {
+          const placa = c.asignacion?.vehiculoPlaca || c.vehiculoNombre || "Sin placa";
+          const vehiculo = vehiculos.find(
+            (v) => v.placa === placa || v.nombre === c.vehiculoNombre
+          );
+          const esperado = c.asignacion?.vehiculoConsumoKm || vehiculo?.consumoCombustibleKm || 0;
+          if (!eficienciaMap[placa]) {
+            eficienciaMap[placa] = {
+              vehiculo: c.vehiculoNombre || vehiculo?.nombre || placa,
+              consumoReal: 0,
+              consumoEsperado: esperado,
+              registros: 0,
+            };
           }
+          eficienciaMap[placa].consumoReal += c.combustibleReal || 0;
+          eficienciaMap[placa].registros += 1;
+          if (esperado > 0) eficienciaMap[placa].consumoEsperado = esperado;
         });
         const eficienciaData = Object.values(eficienciaMap)
-          .map(item => ({
+          .filter((item) => item.consumoEsperado > 0 && item.registros > 0)
+          .map((item) => ({
             vehiculo: item.vehiculo,
             promedio: Number((item.consumoReal / item.registros).toFixed(2)),
-            esperado: item.consumoEsperado
+            esperado: Number(item.consumoEsperado.toFixed(2)),
           }))
           .slice(0, 6);
         setEficienciaVehiculos(eficienciaData);
@@ -330,113 +345,124 @@ export default function DashboardPage() {
   );
 
   const exportToPDF = async () => {
-    if (!dashboardRef.current) return;
-    
     setExportando(true);
     try {
-      const element = dashboardRef.current;
-      
-      // Calcular dimensiones
-      const scale = 2;
-      const canvas = await toPng(element, {
-        quality: 1,
-        pixelRatio: scale,
-        backgroundColor: "#f3f4f6",
-        cacheBust: true,
-      });
-
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "mm",
-        format: "a4",
-      });
-
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      
-      // Crear imagen
-      const img = new Image();
-      img.src = canvas;
-      
-      await new Promise((resolve) => {
-        img.onload = resolve;
+      let cursorY = 20;
+
+      // Encabezado
+      pdf.setFontSize(18);
+      pdf.text("Reporte de Control de Combustible", pageWidth / 2, cursorY, {
+        align: "center",
+      });
+      cursorY += 8;
+      pdf.setFontSize(10);
+      pdf.text(`Generado: ${new Date().toLocaleString("es-ES")}`, pageWidth / 2, cursorY, {
+        align: "center",
+      });
+      cursorY += 10;
+
+      // Resumen principal
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [["Métrica", "Valor"]],
+        body: [
+          ["Total Vehículos", stats.totalVehiculos],
+          ["Vehículos Livianos", stats.livianos],
+          ["Vehículos Pesados", stats.pesados],
+          ["Vehículos Operativos", stats.vehiculosOperativos],
+          ["Vehículos en Mantenimiento", stats.vehiculosMantenimiento],
+          ["Total Consumos", stats.totalConsumos],
+          ["Combustible Total (L)", stats.combustibleTotal.toFixed(2)],
+          ["Promedio por Registro (L)", stats.promedioConsumo.toFixed(2)],
+          ["Total Choferes", stats.totalChoferes],
+          ["Choferes Disponibles", stats.choferesDisponibles],
+          ["Total Rutas", stats.totalRutas],
+          ["Asignaciones", stats.totalAsignaciones],
+        ],
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9, cellPadding: 3 },
+        headStyles: { fillColor: [59, 130, 246] },
       });
 
-      const imgWidth = pageWidth - 20;
-      const imgHeight = (img.height * imgWidth) / img.width;
-      
-      // Si la imagen es más alta que una página, dividirla
-      const maxHeight = pageHeight - 20;
-      let heightLeft = imgHeight;
-      let position = 10;
-      let page = 0;
+      cursorY = pdf.lastAutoTable.finalY + 6;
 
-      // Primera página - Header
-      pdf.setFillColor(59, 130, 246);
-      pdf.rect(0, 0, pageWidth, 25, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(20);
-      pdf.text("Dashboard Control de Combustible", pageWidth / 2, 15, { align: "center" });
-      pdf.setFontSize(10);
-      pdf.text(`Generado: ${new Date().toLocaleString("es-ES")}`, pageWidth / 2, 21, { align: "center" });
+      // Consumo mensual
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [["Mes", "Combustible (L)", "Registros"]],
+        body: consumosPorMes.map((c) => [c.mes, c.combustible.toFixed(2), c.registros]),
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [59, 130, 246] },
+        didDrawPage: (data) => {
+          cursorY = data.cursor.y;
+        },
+      });
 
-      position = 30;
+      cursorY = pdf.lastAutoTable.finalY + 6;
 
-      while (heightLeft > 0) {
-        if (page > 0) {
-          pdf.addPage();
-          position = 10;
-        }
+      // Distribución por tipo
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [["Tipo de Maquinaria", "Combustible (L)", "%"]],
+        body: consumosPorTipo.map((t) => [
+          t.tipo,
+          t.combustible.toFixed(2),
+          stats.combustibleTotal > 0
+            ? `${((t.combustible / stats.combustibleTotal) * 100).toFixed(1)}%`
+            : "0%",
+        ]),
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [16, 185, 129] },
+      });
 
-        const sliceHeight = Math.min(maxHeight, heightLeft);
-        const sourceY = (imgHeight - heightLeft) * (img.height / imgHeight);
-        const sourceHeight = sliceHeight * (img.height / imgHeight);
+      cursorY = pdf.lastAutoTable.finalY + 6;
 
-        // Crear canvas temporal para el slice
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = img.width;
-        tempCanvas.height = sourceHeight;
-        const ctx = tempCanvas.getContext('2d');
-        
-        ctx.drawImage(
-          img,
-          0,
-          sourceY,
-          img.width,
-          sourceHeight,
-          0,
-          0,
-          img.width,
-          sourceHeight
-        );
+      // Rutas más utilizadas
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [["Ruta", "Asignaciones", "Distancia (km)"]],
+        body: rutasMasUsadas.map((r) => [r.nombre, r.asignaciones, r.distancia || 0]),
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [139, 92, 246] },
+      });
 
-        pdf.addImage(
-          tempCanvas.toDataURL('image/png'),
-          'PNG',
-          10,
-          position,
-          imgWidth,
-          sliceHeight
-        );
+      cursorY = pdf.lastAutoTable.finalY + 6;
 
-        heightLeft -= maxHeight;
-        page++;
-      }
+      // Choferes más activos
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [["Chofer", "Asignaciones"]],
+        body: choferesMasActivos.map((c) => [c.nombre, c.asignaciones]),
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [236, 72, 153] },
+      });
 
-      // Footer en última página
-      pdf.setFontSize(8);
-      pdf.setTextColor(100, 100, 100);
-      pdf.text(
-        `Sistema de Control de Combustible - Página ${page}`,
-        pageWidth / 2,
-        pageHeight - 5,
-        { align: "center" }
-      );
+      cursorY = pdf.lastAutoTable.finalY + 6;
 
-      pdf.save(`dashboard-combustible-${new Date().toISOString().split("T")[0]}.pdf`);
+      // Eficiencia de combustible
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [["Vehículo", "Consumo Promedio (L)", "Consumo Esperado (L)"]],
+        body: eficienciaVehiculos.map((e) => [
+          e.vehiculo,
+          e.promedio,
+          e.esperado,
+        ]),
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [239, 68, 68] },
+      });
+
+      pdf.save(`reporte-combustible-${new Date().toISOString().split("T")[0]}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
-      alert("Error al exportar el dashboard. Por favor intenta de nuevo.");
+      alert("Error al exportar el reporte. Por favor intenta de nuevo.");
     } finally {
       setExportando(false);
     }
