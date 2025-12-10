@@ -24,6 +24,7 @@ import {
   Radar,
 } from "recharts";
 import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   normalizeAsignacion,
   normalizeConsumo,
@@ -349,113 +350,224 @@ export default function DashboardPage() {
       const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      let cursorY = 20;
-      const ensureSpace = (needed) => {
-        if (cursorY + needed > pageHeight - 12) {
+      let cursorY = 15;
+      
+      const hexToRgb = (hex) => {
+        const v = parseInt(hex.replace('#', ''), 16);
+        return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+      };
+      const palette = COLORS.map(hexToRgb);
+      
+      // Función auxiliar para añadir nuevas páginas automáticamente
+      const checkPageSpace = (spaceNeeded) => {
+        if (cursorY + spaceNeeded > pageHeight - 15) {
           pdf.addPage();
-          cursorY = 14;
+          cursorY = 15;
+          return true;
         }
+        return false;
       };
 
-      const drawTitle = (title) => {
-        pdf.setFontSize(12);
-        pdf.text(title, pageWidth / 2, cursorY, { align: "center" });
-        cursorY += 6;
+      // ==================== PÁGINA 1: PORTADA Y RESUMEN EJECUTIVO ====================
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, 0, pageWidth, 50, 'F');
+      
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(24);
+      pdf.text("REPORTE DE CONTROL DE COMBUSTIBLE", pageWidth / 2, 25, { align: "center" });
+      
+      pdf.setFontSize(12);
+      pdf.text(`Generado: ${new Date().toLocaleString("es-ES")}`, pageWidth / 2, 35, { align: "center" });
+      pdf.text(`Usuario: ${user?.nombre || "Sistema"}`, pageWidth / 2, 42, { align: "center" });
+      
+      cursorY = 60;
+      
+      // Resumen Ejecutivo
+      pdf.setTextColor(0, 0, 0);
+      pdf.setFontSize(14);
+      pdf.text("RESUMEN EJECUTIVO", 20, cursorY);
+      cursorY += 8;
+      
+      // Caja de KPIs principales
+      const kpis = [
+        { label: "Total Combustible", value: `${stats.combustibleTotal.toFixed(2)} L`, color: [59, 130, 246] },
+        { label: "Promedio por Registro", value: `${stats.promedioConsumo.toFixed(2)} L`, color: [16, 185, 129] },
+        { label: "Total Vehículos", value: stats.totalVehiculos, color: [245, 158, 11] },
+        { label: "Total Choferes", value: stats.totalChoferes, color: [239, 68, 68] },
+      ];
+      
+      const kpiBoxWidth = (pageWidth - 50) / 4;
+      kpis.forEach((kpi, idx) => {
+        const x = 20 + idx * (kpiBoxWidth + 5);
+        pdf.setFillColor(...kpi.color);
+        pdf.rect(x, cursorY, kpiBoxWidth, 15, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(9);
+        pdf.text(kpi.label, x + kpiBoxWidth / 2, cursorY + 4, { align: "center" });
+        pdf.setFontSize(11);
+        pdf.setFont(undefined, "bold");
+        pdf.text(String(kpi.value), x + kpiBoxWidth / 2, cursorY + 11, { align: "center" });
+        pdf.setFont(undefined, "normal");
+      });
+      
+      cursorY += 25;
+      
+      // Tabla de Estadísticas
+      pdf.setTextColor(0, 0, 0);
+      pdf.setFontSize(11);
+      pdf.text("ESTADÍSTICAS GENERALES", 20, cursorY);
+      cursorY += 5;
+      
+      const statsData = [
+        ["Métrica", "Valor"],
+        ["Vehículos Operativos", stats.vehiculosOperativos],
+        ["Vehículos en Mantenimiento", stats.vehiculosMantenimiento],
+        ["Choferes Disponibles", stats.choferesDisponibles],
+        ["Total de Rutas", stats.totalRutas],
+        ["Total de Asignaciones", stats.totalAsignaciones],
+        ["Vehículos Livianos", stats.livianos],
+        ["Vehículos Pesados", stats.pesados],
+      ];
+      
+      autoTable(pdf, {
+        startY: cursorY,
+        head: [statsData[0]],
+        body: statsData.slice(1),
+        columnStyles: { 0: { cellWidth: 120 }, 1: { cellWidth: 30 } },
+        headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold' },
+        bodyStyles: { textColor: [50, 50, 50] },
+        alternateRowStyles: { fillColor: [240, 240, 240] },
+        margin: 20,
+        didDrawPage: () => {}
+      });
+      
+      cursorY = pdf.lastAutoTable.finalY + 5;
+      
+      // ==================== PÁGINA 2 Y SIGUIENTES: GRÁFICAS ====================
+      const drawPageTitle = (title) => {
+        if (cursorY > pageHeight - 40) {
+          pdf.addPage();
+          cursorY = 15;
+        }
+        pdf.setFontSize(13);
+        pdf.setTextColor(59, 130, 246);
+        pdf.setFont(undefined, "bold");
+        pdf.text(title, 20, cursorY);
+        pdf.setFont(undefined, "normal");
+        pdf.setTextColor(0, 0, 0);
+        cursorY += 8;
+        return cursorY;
       };
 
-      const drawBarChart = ({ title, data, labelKey, valueKey, color = [59, 130, 246] }) => {
+      const drawBarChart = ({ title, data, labelKey, valueKey, color = [59, 130, 246], maxItems = 10 }) => {
         if (!data || data.length === 0) return;
-        const barHeight = 6;
-        const gap = 4;
+        drawPageTitle(title);
+        
+        const itemsToShow = data.slice(0, maxItems);
+        const barHeight = 5.5;
+        const gap = 2;
         const marginX = 20;
-        const chartWidth = pageWidth - marginX * 2;
-        const maxValue = Math.max(...data.map((d) => Number(d[valueKey] || 0)), 1);
-        ensureSpace(16 + data.length * (barHeight + gap));
-        drawTitle(title);
-        data.forEach((item) => {
-          const label = String(item[labelKey]).slice(0, 28);
+        const chartWidth = pageWidth - marginX * 2 - 30;
+        const maxValue = Math.max(...itemsToShow.map((d) => Number(d[valueKey] || 0)), 1);
+        
+        if (cursorY + itemsToShow.length * (barHeight + gap) > pageHeight - 15) {
+          pdf.addPage();
+          cursorY = 15;
+        }
+        
+        itemsToShow.forEach((item) => {
+          const label = String(item[labelKey]).slice(0, 20);
           const val = Number(item[valueKey] || 0);
           const width = (val / maxValue) * chartWidth;
+          
           pdf.setFontSize(8);
-          pdf.setTextColor(55, 65, 81);
-          pdf.text(label, marginX, cursorY + barHeight - 1);
+          pdf.setTextColor(100, 100, 100);
+          pdf.text(label, marginX, cursorY + barHeight);
+          
           pdf.setFillColor(...color);
-          pdf.rect(marginX + 40, cursorY, width, barHeight, "F");
-          pdf.text(`${val}`, marginX + 40 + width + 2, cursorY + barHeight - 1);
+          pdf.rect(marginX + 35, cursorY, width, barHeight, "F");
+          
+          pdf.setTextColor(0, 0, 0);
+          pdf.setFontSize(7);
+          pdf.text(`${val.toFixed(2)}`, marginX + 35 + width + 2, cursorY + barHeight);
+          
           cursorY += barHeight + gap;
         });
-        cursorY += 2;
+        cursorY += 8;
       };
 
       const drawLineChart = ({ title, data, yKey, color = [16, 185, 129] }) => {
         if (!data || data.length === 0) return;
-        const height = 50;
+        const height = 40;
         const marginX = 24;
-        const chartWidth = pageWidth - marginX * 2;
+        const chartWidth = pageWidth - marginX * 2 - 30;
+        
+        if (cursorY + height + 20 > pageHeight - 15) {
+          pdf.addPage();
+          cursorY = 15;
+        }
+        
+        drawPageTitle(title);
+        
         const maxY = Math.max(...data.map((d) => Number(d[yKey] || 0)), 1);
         const stepX = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
-        ensureSpace(70);
-        drawTitle(title);
         const baseY = cursorY + height;
+        
         pdf.setDrawColor(...color);
-        pdf.setLineWidth(0.8);
+        pdf.setLineWidth(1);
+        
         data.forEach((point, idx) => {
           const x = marginX + idx * stepX;
           const yVal = Number(point[yKey] || 0);
           const y = baseY - (yVal / maxY) * height;
+          
           if (idx === 0) pdf.moveTo(x, y);
           else pdf.lineTo(x, y);
-          pdf.circle(x, y, 1.5, "F");
+          
+          pdf.setFillColor(...color);
+          pdf.circle(x, y, 1, "F");
         });
         pdf.stroke();
-        cursorY += height + 10;
-      };
-
-      const drawAreaChart = ({ title, data, yKey, color = [59, 130, 246] }) => {
-        if (!data || data.length === 0) return;
-        const height = 50;
-        const marginX = 24;
-        const chartWidth = pageWidth - marginX * 2;
-        const maxY = Math.max(...data.map((d) => Number(d[yKey] || 0)), 1);
-        const stepX = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
-        ensureSpace(80);
-        drawTitle(title);
-        const baseY = cursorY + height;
-        pdf.setDrawColor(...color);
-        pdf.setFillColor(...color);
-        pdf.setLineWidth(0.6);
-        pdf.moveTo(marginX, baseY);
+        
+        // Etiquetas del eje X
+        pdf.setFontSize(7);
+        pdf.setTextColor(100, 100, 100);
         data.forEach((point, idx) => {
           const x = marginX + idx * stepX;
-          const yVal = Number(point[yKey] || 0);
-          const y = baseY - (yVal / maxY) * height;
-          pdf.lineTo(x, y);
+          const label = point.mes || `${idx}`;
+          pdf.text(label, x, baseY + 5, { align: "center" });
         });
-        pdf.lineTo(marginX + chartWidth, baseY);
-        pdf.lineTo(marginX, baseY);
-        pdf.setFillColor(color[0], color[1], color[2], 60);
-        pdf.fill();
-        cursorY += height + 12;
+        
+        cursorY += height + 15;
       };
 
       const drawPieChart = ({ title, data, labelKey, valueKey, colors }) => {
         if (!data || data.length === 0) return;
-        ensureSpace(80);
-        drawTitle(title);
-        const radius = 30;
+        
+        if (cursorY + 50 > pageHeight - 15) {
+          pdf.addPage();
+          cursorY = 15;
+        }
+        
+        drawPageTitle(title);
+        
+        const radius = 28;
         const cx = pageWidth / 2;
-        const cy = cursorY + radius + 4;
+        const cy = cursorY + radius;
         const total = data.reduce((s, d) => s + (Number(d[valueKey]) || 0), 0) || 1;
+        
         let startAngle = 0;
         data.forEach((d, idx) => {
           const val = Number(d[valueKey]) || 0;
           const angle = (val / total) * Math.PI * 2;
           const endAngle = startAngle + angle;
           const col = colors[idx % colors.length];
+          
           pdf.setFillColor(...col);
-          const steps = Math.max(4, Math.ceil((angle / (Math.PI * 2)) * 24));
+          const steps = Math.max(3, Math.ceil((angle / (Math.PI * 2)) * 16));
           let prevX = cx + radius * Math.cos(startAngle);
           let prevY = cy + radius * Math.sin(startAngle);
+          
           for (let s = 1; s <= steps; s += 1) {
             const t = startAngle + (angle * s) / steps;
             const x = cx + radius * Math.cos(t);
@@ -466,154 +578,373 @@ export default function DashboardPage() {
           }
           startAngle = endAngle;
         });
-        // mini-leyenda
-        let ly = cy + radius + 8;
+        
+        // Leyenda
+        cursorY += radius + 5;
+        let legendX = 30;
+        let legendY = cursorY;
+        let col = 0;
+        
         data.forEach((d, idx) => {
-          const col = colors[idx % colors.length];
-          pdf.setFillColor(...col);
-          pdf.rect(cx - 40, ly - 4, 6, 6, 'F');
-          pdf.setFontSize(8);
+          if (col > 2) {
+            col = 0;
+            legendY += 6;
+          }
+          
+          const legendItemX = legendX + col * 80;
+          pdf.setFillColor(...colors[idx % colors.length]);
+          pdf.rect(legendItemX, legendY - 3, 4, 4, 'F');
+          
+          pdf.setFontSize(7);
+          pdf.setTextColor(50, 50, 50);
           const val = Number(d[valueKey]) || 0;
           const pct = ((val / total) * 100).toFixed(1);
-          pdf.text(`${d[labelKey]} (${pct}%)`, cx - 30, ly + 1);
-          ly += 6;
+          const label = `${d[labelKey]}: ${pct}%`;
+          pdf.text(label, legendItemX + 6, legendY);
+          col++;
         });
-        cursorY = ly + 6;
+        
+        cursorY = legendY + 8;
       };
 
-      const drawRadarChart = ({ title, data, series }) => {
-        if (!data || data.length === 0 || series.length === 0) return;
-        const axes = data.slice(0, 6);
-        const values = axes.flatMap((item) => series.map((s) => Number(item[s.key] || 0)));
-        const maxVal = Math.max(...values, 1);
-        const radius = 34;
-        const cx = pageWidth / 2;
-        ensureSpace(110);
-        drawTitle(title);
-        const cy = cursorY + radius + 6;
-        const angleStep = (Math.PI * 2) / axes.length;
-        pdf.setDrawColor(156, 163, 175);
-        pdf.setLineWidth(0.25);
-        for (let r = 0.25; r <= 1.01; r += 0.25) {
-          pdf.circle(cx, cy, radius * r, 'S');
-        }
-        series.forEach((serie) => {
-          pdf.setDrawColor(...serie.color);
-          pdf.setFillColor(serie.color[0], serie.color[1], serie.color[2], 50);
-          pdf.setLineWidth(0.8);
-          let startX = null;
-          let startY = null;
-          axes.forEach((item, idx) => {
-            const val = Number(item[serie.key] || 0);
-            const r = (val / maxVal) * radius;
-            const angle = -Math.PI / 2 + idx * angleStep;
-            const x = cx + r * Math.cos(angle);
-            const y = cy + r * Math.sin(angle);
-            if (idx === 0) {
-              pdf.moveTo(x, y);
-              startX = x;
-              startY = y;
-            } else {
-              pdf.lineTo(x, y);
-            }
-            pdf.circle(x, y, 1.5, 'F');
-          });
-          if (startX !== null && startY !== null) {
-            pdf.lineTo(startX, startY);
-          }
-          pdf.fillStroke();
-        });
-        // etiquetas
-        pdf.setFontSize(8);
-        axes.forEach((item, idx) => {
-          const angle = -Math.PI / 2 + idx * angleStep;
-          const x = cx + (radius + 10) * Math.cos(angle);
-          const y = cy + (radius + 10) * Math.sin(angle);
-          const label = (item.vehiculo || 'Vehículo').slice(0, 12);
-          pdf.text(label, x, y, { align: 'center' });
-        });
-        // leyenda simple
-        let legendY = cy + radius + 12;
-        series.forEach((serie) => {
-          pdf.setFillColor(...serie.color);
-          pdf.rect(cx - 35, legendY - 4, 6, 6, 'F');
-          pdf.text(serie.label, cx - 26, legendY + 1);
-          legendY += 6;
-        });
-        cursorY = legendY + 6;
-      };
-
-      // Encabezado
-      pdf.setFontSize(18);
-      pdf.text("Reporte de Control de Combustible", pageWidth / 2, cursorY, {
-        align: "center",
-      });
-      cursorY += 8;
-      pdf.setFontSize(10);
-      pdf.text(`Generado: ${new Date().toLocaleString("es-ES")}`, pageWidth / 2, cursorY, {
-        align: "center",
-      });
-      cursorY += 10;
-
-      cursorY += 6;
-
-      const hexToRgb = (hex) => {
-        const v = parseInt(hex.replace('#', ''), 16);
-        return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-      };
-      const palette = COLORS.map(hexToRgb);
-
-      // Gráficos en formato vectorial simple para PDF (sin screenshots)
-      drawAreaChart({
-        title: "Consumo mensual (L)",
+      // ==================== PÁGINA DE GRÁFICAS ====================
+      
+      // GRÁFICA 1: Consumo Mensual
+      drawLineChart({
+        title: "GRAFICA 1: Consumo de Combustible por Mes",
         data: consumosPorMes,
         yKey: "combustible",
         color: [59, 130, 246],
       });
 
+      // GRÁFICA 2: Registros por Mes
       drawLineChart({
-        title: "Registros de consumo por mes",
+        title: "GRAFICA 2: Evolución de Registros de Consumo",
         data: consumosPorMes,
         yKey: "registros",
         color: [16, 185, 129],
       });
 
+      // GRÁFICA 3: Distribución por tipo
       drawPieChart({
-        title: "Distribución por tipo de maquinaria",
+        title: "GRAFICA 3: Distribución de Consumo por Tipo de Maquinaria",
         data: consumosPorTipo,
         labelKey: "tipo",
         valueKey: "combustible",
         colors: palette,
       });
 
+      // GRÁFICA 4: Vehículos con mayor consumo
       drawBarChart({
-        title: "Rutas más utilizadas (asignaciones)",
+        title: "GRAFICA 4: Vehículos con Mayor Consumo - TOP 10",
+        data: consumosPorVehiculo,
+        labelKey: "placa",
+        valueKey: "combustible",
+        color: [59, 130, 246],
+      });
+
+      // GRÁFICA 5: Rutas más usadas
+      drawBarChart({
+        title: "GRAFICA 5: Rutas Más Utilizadas - TOP 10",
         data: rutasMasUsadas,
         labelKey: "nombre",
         valueKey: "asignaciones",
         color: [139, 92, 246],
       });
 
+      // GRÁFICA 6: Choferes más activos
       drawBarChart({
-        title: "Choferes más activos (asignaciones)",
+        title: "GRAFICA 6: Choferes Más Activos - TOP 10",
         data: choferesMasActivos,
         labelKey: "nombre",
         valueKey: "asignaciones",
         color: [236, 72, 153],
       });
 
-      drawRadarChart({
-        title: "Eficiencia de combustible (real vs esperado)",
-        data: eficienciaVehiculos.slice(0, 6),
-        series: [
-          { key: "promedio", label: "Promedio real", color: [239, 68, 68] },
-          { key: "esperado", label: "Esperado", color: [16, 185, 129] },
-        ],
+      // ==================== PÁGINA DE TABLAS DETALLADAS ====================
+      
+      // TABLA 1: CONSUMO POR MES (DETALLADO)
+      checkPageSpace(50);
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("ANALISIS MENSUAL DE CONSUMO", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      const consumoMensualData = consumosPorMes.map((mes) => [
+        mes.mes || "",
+        mes.combustible ? mes.combustible.toFixed(2) : "0.00",
+        mes.registros || "0",
+        mes.combustible && mes.registros ? (mes.combustible / mes.registros).toFixed(2) : "0.00",
+      ]);
+      
+      if (consumoMensualData.length > 0) {
+        autoTable(pdf, {
+          startY: cursorY,
+          head: [["Mes", "Combustible Total (L)", "Registros", "Promedio por Registro (L)"]],
+          body: consumoMensualData,
+          columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 45 }, 2: { cellWidth: 40 }, 3: { cellWidth: 45 } },
+          headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { textColor: [50, 50, 50], fontSize: 8 },
+          alternateRowStyles: { fillColor: [240, 245, 255] },
+          margin: 20,
+        });
+        cursorY = pdf.lastAutoTable.finalY + 8;
+      }
+
+      // TABLA 2: CONSUMO POR VEHÍCULO (DETALLADO)
+      checkPageSpace(60);
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("CONSUMO POR VEHICULO - TOP 15", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      const vehicleTableData = consumosPorVehiculo.slice(0, 15).map((v, idx) => [
+        String(idx + 1),
+        v.placa || "-",
+        v.combustible ? v.combustible.toFixed(2) : "0.00",
+        v.registros || "0",
+        v.combustible && v.registros ? (v.combustible / v.registros).toFixed(2) : "0.00",
+      ]);
+      
+      if (vehicleTableData.length > 0) {
+        autoTable(pdf, {
+          startY: cursorY,
+          head: [["#", "Placa", "Combustible (L)", "Registros", "Promedio (L)"]],
+          body: vehicleTableData,
+          columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 35 }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 }, 4: { cellWidth: 30 } },
+          headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { textColor: [50, 50, 50], fontSize: 8 },
+          alternateRowStyles: { fillColor: [240, 245, 255] },
+          margin: 20,
+        });
+        cursorY = pdf.lastAutoTable.finalY + 8;
+      }
+
+      // TABLA 3: RUTAS MÁS UTILIZADAS (DETALLADA)
+      checkPageSpace(50);
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("RUTAS MAS UTILIZADAS - TOP 10", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      const rutasTableData = rutasMasUsadas.slice(0, 10).map((r, idx) => [
+        String(idx + 1),
+        r.nombre || "-",
+        r.asignaciones || "0",
+        r.combustible ? r.combustible.toFixed(2) : "0.00",
+      ]);
+      
+      if (rutasTableData.length > 0) {
+        autoTable(pdf, {
+          startY: cursorY,
+          head: [["#", "Nombre de Ruta", "Asignaciones", "Combustible (L)"]],
+          body: rutasTableData,
+          columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 80 }, 2: { cellWidth: 35 }, 3: { cellWidth: 40 } },
+          headStyles: { fillColor: [139, 92, 246], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { textColor: [50, 50, 50], fontSize: 8 },
+          alternateRowStyles: { fillColor: [245, 240, 255] },
+          margin: 20,
+        });
+        cursorY = pdf.lastAutoTable.finalY + 8;
+      }
+
+      // TABLA 4: CHOFERES MÁS ACTIVOS (DETALLADA)
+      checkPageSpace(50);
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("CHOFERES MAS ACTIVOS - TOP 10", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      const choferesTableData = choferesMasActivos.slice(0, 10).map((c, idx) => [
+        String(idx + 1),
+        c.nombre || "-",
+        c.asignaciones || "0",
+        c.combustible ? c.combustible.toFixed(2) : "0.00",
+      ]);
+      
+      if (choferesTableData.length > 0) {
+        autoTable(pdf, {
+          startY: cursorY,
+          head: [["#", "Nombre del Chofer", "Asignaciones", "Combustible (L)"]],
+          body: choferesTableData,
+          columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 80 }, 2: { cellWidth: 35 }, 3: { cellWidth: 40 } },
+          headStyles: { fillColor: [236, 72, 153], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { textColor: [50, 50, 50], fontSize: 8 },
+          alternateRowStyles: { fillColor: [255, 240, 245] },
+          margin: 20,
+        });
+        cursorY = pdf.lastAutoTable.finalY + 8;
+      }
+
+      // TABLA 5: DISTRIBUCIÓN POR TIPO DE MAQUINARIA
+      checkPageSpace(50);
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("CONSUMO POR TIPO DE MAQUINARIA", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      const maquinariaTableData = consumosPorTipo.map((m, idx) => {
+        const total = consumosPorTipo.reduce((s, x) => s + (x.combustible || 0), 0) || 1;
+        const porcentaje = ((m.combustible / total) * 100).toFixed(1);
+        return [
+          String(idx + 1),
+          m.tipo || "-",
+          m.combustible ? m.combustible.toFixed(2) : "0.00",
+          porcentaje,
+        ];
+      });
+      
+      if (maquinariaTableData.length > 0) {
+        autoTable(pdf, {
+          startY: cursorY,
+          head: [["#", "Tipo de Maquinaria", "Combustible (L)", "Porcentaje"]],
+          body: maquinariaTableData,
+          columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 80 }, 2: { cellWidth: 40 }, 3: { cellWidth: 35 } },
+          headStyles: { fillColor: [245, 158, 11], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { textColor: [50, 50, 50], fontSize: 8 },
+          alternateRowStyles: { fillColor: [255, 250, 240] },
+          margin: 20,
+        });
+        cursorY = pdf.lastAutoTable.finalY + 8;
+      }
+
+      // TABLA 6: ESTADO DE VEHÍCULOS
+      checkPageSpace(40);
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("ESTADO DE VEHICULOS", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      const estadoTableData = estadoVehiculos.map((e, idx) => [
+        String(idx + 1),
+        e.estado || "-",
+        e.cantidad || "0",
+        ((e.cantidad / stats.totalVehiculos) * 100).toFixed(1),
+      ]);
+      
+      if (estadoTableData.length > 0) {
+        autoTable(pdf, {
+          startY: cursorY,
+          head: [["#", "Estado", "Cantidad", "Porcentaje"]],
+          body: estadoTableData,
+          columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 80 }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 } },
+          headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { textColor: [50, 50, 50], fontSize: 8 },
+          alternateRowStyles: { fillColor: [240, 255, 250] },
+          margin: 20,
+        });
+        cursorY = pdf.lastAutoTable.finalY + 8;
+      }
+
+      // ==================== PÁGINA FINAL: ANÁLISIS Y RECOMENDACIONES ====================
+      checkPageSpace(80);
+      
+      pdf.setFontSize(13);
+      pdf.setTextColor(59, 130, 246);
+      pdf.setFont(undefined, "bold");
+      pdf.text("ANALISIS Y RECOMENDACIONES", 20, cursorY);
+      pdf.setFont(undefined, "normal");
+      pdf.setTextColor(0, 0, 0);
+      cursorY += 8;
+      
+      // Cálculos de análisis
+      const totalCombustible = stats.combustibleTotal;
+      const promedioPorVehiculo = stats.totalVehiculos > 0 ? totalCombustible / stats.totalVehiculos : 0;
+      const eficienciaPromedio = stats.totalAsignaciones > 0 ? totalCombustible / stats.totalAsignaciones : 0;
+      
+      // Vehículos con mayor consumo
+      const vehiculoConMayorConsumo = consumosPorVehiculo.length > 0 ? consumosPorVehiculo[0] : null;
+      const vehiculoConMenorConsumo = consumosPorVehiculo.length > 0 ? consumosPorVehiculo[consumosPorVehiculo.length - 1] : null;
+      
+      const analysisText = [
+        "1. CONSUMO GENERAL:",
+        `   Combustible total consumido: ${totalCombustible.toFixed(2)} litros`,
+        `   Promedio por vehiculo: ${promedioPorVehiculo.toFixed(2)} litros`,
+        `   Promedio por asignacion: ${eficienciaPromedio.toFixed(2)} litros`,
+        `   Total de registros: ${stats.totalConsumos}`,
+        ``,
+        "2. FLOTA DE VEHICULOS:",
+        `   Vehiculos operativos: ${stats.vehiculosOperativos}/${stats.totalVehiculos}`,
+        `   En mantenimiento: ${stats.vehiculosMantenimiento}`,
+        `   Vehiculos livianos: ${stats.livianos} | Pesados: ${stats.pesados}`,
+        ``,
+        "3. RECURSOS HUMANOS:",
+        `   Total de choferes: ${stats.totalChoferes}`,
+        `   Choferes disponibles: ${stats.choferesDisponibles}`,
+        ``,
+        "4. OPERACIONES:",
+        `   Total de rutas: ${stats.totalRutas}`,
+        `   Total de asignaciones: ${stats.totalAsignaciones}`,
+        vehiculoConMayorConsumo ? `   Mayor consumidor: ${vehiculoConMayorConsumo.placa} (${vehiculoConMayorConsumo.combustible?.toFixed(2) || 0}L)` : '',
+        ``,
+        "5. RECOMENDACIONES:",
+        `   - Realizar mantenimiento preventivo a vehiculos con alto consumo`,
+        `   - Monitorear la eficiencia de combustible de choferes nuevos`,
+        `   - Optimizar rutas para reducir distancias y consumo`,
+        `   - Implementar sistemas de telemetria para seguimiento en tiempo real`,
+      ];
+      
+      analysisText.forEach((line) => {
+        if (checkPageSpace(5)) {
+          // Si cambiamos de página, reiniciamos con mejor espaciado
+        }
+        pdf.setFontSize(8);
+        if (line.includes('1.') || line.includes('2.') || line.includes('3.') || line.includes('4.') || line.includes('5.')) {
+          pdf.setTextColor(59, 130, 246);
+          pdf.setFont(undefined, "bold");
+        } else if (line.includes('-')) {
+          pdf.setTextColor(16, 185, 129);
+        } else {
+          pdf.setTextColor(100, 100, 100);
+          pdf.setFont(undefined, "normal");
+        }
+        pdf.text(line, 20, cursorY, { maxWidth: pageWidth - 40 });
+        cursorY += 4;
       });
 
-      ensureSpace(6);
-      pdf.setDrawColor(209, 213, 219);
-      pdf.line(14, cursorY, pageWidth - 14, cursorY);
+      // ==================== PIE DE PÁGINA Y RESUMEN FINAL ====================
+      checkPageSpace(30);
+      
+      pdf.setFillColor(240, 240, 240);
+      pdf.rect(0, pageHeight - 25, pageWidth, 25, 'F');
+      
+      pdf.setFontSize(9);
+      pdf.setTextColor(50, 50, 50);
+      pdf.setFont(undefined, "bold");
+      pdf.text("RESUMEN FINAL", 20, pageHeight - 18);
+      
+      pdf.setFont(undefined, "normal");
+      pdf.setFontSize(8);
+      const summaryText = `Total Combustible: ${stats.combustibleTotal.toFixed(2)}L | Total Registros: ${stats.totalConsumos} | Vehículos: ${stats.totalVehiculos} | Choferes: ${stats.totalChoferes} | Rutas: ${stats.totalRutas}`;
+      pdf.text(summaryText, 20, pageHeight - 12, { maxWidth: pageWidth - 40 });
+      
+      pdf.setTextColor(150, 150, 150);
+      pdf.setFontSize(7);
+      pdf.text(
+        `Reporte generado: ${new Date().toLocaleString("es-ES")} | Usuario: ${user?.nombre || "Sistema"} | Página: `,
+        20,
+        pageHeight - 5
+      );
+      const pageCount = pdf.internal.pages.length - 1;
+      pdf.text(String(pageCount), 300, pageHeight - 5);
 
       pdf.save(`reporte-combustible-${new Date().toISOString().split("T")[0]}.pdf`);
     } catch (error) {
